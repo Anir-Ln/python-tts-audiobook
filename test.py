@@ -1,5 +1,5 @@
 from unittest.mock import Mock
-from main import TTS, AudioBookGenerator, Chapter
+from main import TTS, AudioBookGenerator, Chapter, Book
 import asyncio
 
 chapter_1 = Chapter(
@@ -22,22 +22,15 @@ chapter_2 = Chapter(
 
 def test():
   tts = TTS()
-  book = Mock()
-  metadata = {"title": "The best book",
-              "creator": "anir", "date": "25-10-2024"}
-  book.title = metadata["title"]
+  book = Mock(Book)
+  metadata = Mock()
+  metadata.title = "The best book"
+  metadata.creator = "anir"
+  metadata.date = "25-10-2024"
+  book.metadata = metadata
+  book.title = metadata.title
   book.chapters = [chapter_1, chapter_2]
-  book.get_metadata_text.return_value = (
-      ";FFMETADATA1\n"
-      "major_brand=M4A\n"
-      "minor_version=512\n"
-      "compatible_brands=M4A isomiso2\n"
-      f"title={metadata['title']}\n"
-      f"artist={metadata['creator']}\n"
-      f"album={metadata['title']}\n"
-      f"date={metadata['date']}\n"
-      "genre=Audiobook\n"
-  )
+  book.get_metadata_text.return_value = Book.get_metadata_text(book)
 
   b2audio = AudioBookGenerator(book, tts)
   asyncio.run(b2audio.generate())
