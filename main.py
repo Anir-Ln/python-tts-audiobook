@@ -1,3 +1,4 @@
+import base64
 import io
 from ebooklib import epub
 import epub_metadata
@@ -37,7 +38,7 @@ class AudioHelper:
   def bytes2audio(audio_bytes: io.BytesIO):
     audio_bytes.seek(0)
     return AudioSegment.from_raw(
-        audio_bytes, sample_width=2, frame_rate=24000, channels=1
+      audio_bytes, sample_width=2, frame_rate=24000, channels=1
     )
 
 
@@ -51,14 +52,13 @@ class Chapter:
 
   def get_metadata_text(self):
     if self.start_time == None or self.end_time == None:
-      print("ERROR, chapter time is NONE",
-            self.start_time, self.end_time)
+      print("ERROR, chapter time is NONE", self.start_time, self.end_time)
     return (
-        "\n[CHAPTER]\n"
-        "TIMEBASE=1/1000\n"
-        f"START={self.start_time}\n"
-        f"END={self.end_time}\n"
-        f"title={self.title}\n"
+      "\n[CHAPTER]\n"
+      "TIMEBASE=1/1000\n"
+      f"START={self.start_time}\n"
+      f"END={self.end_time}\n"
+      f"title={self.title}\n"
     )
 
 
@@ -71,15 +71,15 @@ class Book:
 
   def get_metadata_text(self):
     return (
-        ";FFMETADATA1\n"
-        "major_brand=M4A\n"
-        "minor_version=512\n"
-        "compatible_brands=M4A isomiso2\n"
-        f"title={self.metadata.title}\n"
-        f"artist={self.metadata.creator}\n"
-        f"album={self.metadata.title}\n"
-        f"date={self.metadata.date}\n"
-        "genre=Audiobook\n"
+      ";FFMETADATA1\n"
+      "major_brand=M4A\n"
+      "minor_version=512\n"
+      "compatible_brands=M4A isomiso2\n"
+      f"title={self.metadata.title}\n"
+      f"artist={self.metadata.creator}\n"
+      f"album={self.metadata.title}\n"
+      f"date={self.metadata.date}\n"
+      "genre=Audiobook\n"
     )
 
   def get_chapters_titles(self):
@@ -89,7 +89,6 @@ class Book:
     book = epub.read_epub(self.file_path)
     toc = book.toc
     toc_items: List[epub.Link] = []
-
     # Helper function to extract titles from TOC
     def extract_toc_items(items):
       for item in items:
@@ -97,25 +96,19 @@ class Book:
           toc_items.append(item)
         elif isinstance(item, tuple):  # Handle nested TOC
           extract_toc_items(item[1])
-
     extract_toc_items(toc)
-
     chapters = []
-
     # Helper function to extract text content from an epub document
     def extract_paragraphs(item):
       soup = BeautifulSoup(item.get_body_content(), "html.parser")
       paragraphs = [p.get_text() for p in soup.find_all("p")]
       return paragraphs
-
     # Extract chapter content for the selected range
     for idx, toc_item in enumerate(toc_items):
       for doc_item in book.get_items():
         if doc_item.get_name() == toc_item.href:
           paragraphs = extract_paragraphs(doc_item)
           chapters.append(Chapter(idx, toc_item.title, paragraphs))
-
-    # todo: extract metadata
     return chapters
 
 
@@ -129,11 +122,11 @@ class TTS:
       audio_bytes = await self.generate_audio(chapter.title)
       chapter_bytes.write(audio_bytes)
       chapter_bytes.write(
-          AudioHelper.generate_pause(CHAPTER_TITLE_PAUSE_DURATION)
+        AudioHelper.generate_pause(CHAPTER_TITLE_PAUSE_DURATION)
       )
     audio_chunks = AudioHelper.insert_pauses(
-        [await self.generate_audio(p) for p in chapter.paragraphs],
-        PARAGRAPH_PAUSE_DURATION,
+      [await self.generate_audio(p) for p in chapter.paragraphs],
+      PARAGRAPH_PAUSE_DURATION,
     )
     for chunk in audio_chunks:
       chapter_bytes.write(chunk)
@@ -153,8 +146,7 @@ class TTS:
       print(f"Decoding the chunk")
       decoded_chunk = AudioSegment.from_mp3(audio_bytes)
     except Exception as e:
-      print(f"Failed to decode the chunk, reason: {
-          e}, returning a silent chunk.")
+      print(f"Failed to decode the chunk, reason: {e}, returning a silent chunk.")
       decoded_chunk = AudioSegment.silent(0)
     return decoded_chunk.raw_data
 
@@ -172,23 +164,25 @@ class AudioBookGenerator:
     if not os.path.exists(self.out_folder + "/chapters"):
       os.makedirs(self.out_folder + "/chapters")
 
-  async def generate(self):
+  def generate(self):
+    asyncio.run(self._generate())
+
+  async def _generate(self):
     book_audio = AudioSegment.empty()
     book_ffmetadata = self.book.get_metadata_text()
     time = 0.0
     for chapter in self.book.chapters[self.start_chapter: self.end_chapter + 1]:
       chapter_bytes: io.BytesIO = await self.tts.chapter_to_audio(chapter)
-      chapter_audio: AudioSegment = AudioHelper.bytes2audio(
-          chapter_bytes)
+      chapter_audio: AudioSegment = AudioHelper.bytes2audio(chapter_bytes)
       print(f"saving {chapter_audio.duration_seconds} seconds")
       chapter_audio.export(
-          self.out_folder + "/chapters/" + chapter.title + ".mp3"
+        self.out_folder + "/chapters/" + chapter.title + ".mp3"
       )
       book_audio += chapter_audio
       book_audio += AudioSegment.silent(CHAPTER_PAUSE_DURATION)
       chapter.start_time = time
       chapter.end_time = (
-          time + chapter_audio.duration_seconds * 1000 + CHAPTER_PAUSE_DURATION
+        time + chapter_audio.duration_seconds * 1000 + CHAPTER_PAUSE_DURATION
       )
       time = chapter.end_time
       book_ffmetadata += (
@@ -200,23 +194,46 @@ class AudioBookGenerator:
     self._bind_metadata(book_ffmetadata, audiobook_path)
 
   def _bind_metadata(self, metadata, audiobook_path):
+    cover_path = self._save_cover_image()
     ffmetadata_path = self.out_folder + "/ffmetadata.txt"
     with open(ffmetadata_path, "w") as f:
       print(metadata, file=f)
-
-    cmd = ["ffmpeg", "-y", "-i", audiobook_path, "-i", ffmetadata_path, "-map_metadata", "1", "-map_chapters", "1",
-           "-c", "copy", audiobook_path[:-4] + ".m4b"]
+    cmd = [
+      "ffmpeg", "-y",
+      "-i", audiobook_path,                # Input audiobook
+      "-i", ffmetadata_path,               # Metadata file
+      "-i", cover_path,                    # Cover image
+      "-map_metadata", "1",                # Map metadata from ffmetadata file
+      "-map_chapters", "1",                # Map chapters from ffmetadata file
+      "-map", "0",                         # Map main audio
+      "-map", "2",                         # Map cover image
+      "-c", "copy",                        # Copy codec for audio
+      "-disposition:v:0", "attached_pic",  # Mark cover as attached picture
+      audiobook_path[:-4] + ".m4b"         # Output file with .m4b extension
+    ]
     subprocess.run(cmd)
 
+  def _save_cover_image(self):
+    try:
+      cover_base64 = self.book.metadata.cover
+      # Decode the base64 string
+      cover_data = base64.b64decode(cover_base64)
+      cover_path = self.out_folder + "/cover.jpg"
+      # Choose the appropriate file extension (.jpg or .png)
+      with open(cover_path, "wb") as image_file:
+        image_file.write(cover_data)
+      return cover_path
+    except:
+      return "./default_cover.jpg"
 
-def main():
+
+if __name__ == "__main__":
   # Get the file path from the user
   file_path = input("Please provide the path to the ePub file: ")
   assert file_path.endswith(".epub"), "epub file should have .epub extension"
   tts = TTS("en-US-BrianMultilingualNeural")
   book = Book(file_path)
   book2audio = AudioBookGenerator(book, tts)
-  print(book.metadata)
   try:
     # Extract TOC
     toc_titles = book.get_chapters_titles()
@@ -228,18 +245,14 @@ def main():
     start_chapter = int(input("\nEnter the start chapter number: "))
     end_chapter = int(input("Enter the end chapter number: "))
     if (
-        start_chapter < 0
-        or end_chapter > len(toc_titles) - 1
-        or start_chapter > end_chapter
+      start_chapter < 0
+      or end_chapter > len(toc_titles) - 1
+      or start_chapter > end_chapter
     ):
       print("Invalid chapter range. Exiting.")
       sys.exit(1)
     book2audio.start_chapter = start_chapter
     book2audio.end_chapter = end_chapter
-    asyncio.run(book2audio.generate())
+    book2audio.generate()
   except Exception as e:
     print(f"An error occurred: {e}")
-
-
-if __name__ == "__main__":
-  main()
