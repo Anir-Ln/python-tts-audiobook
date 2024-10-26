@@ -10,11 +10,16 @@ import os
 from pydub import AudioSegment
 from typing import List
 import subprocess
+import argparse
 
 ### CONSTANTS ###
 PARAGRAPH_PAUSE_DURATION = 500
 CHAPTER_TITLE_PAUSE_DURATION = 900
 CHAPTER_PAUSE_DURATION = 2000
+VOICES = {
+  "EN": ["en-US-BrianMultilingualNeural", "en-US-AndrewMultilingualNeural", "en-US-AvaMultilingualNeural"],
+  "FR": ["fr-FR-EloiseNeural"]
+}
 #################
 
 
@@ -108,12 +113,12 @@ class Book:
       for doc_item in book.get_items():
         if doc_item.get_name() == toc_item.href:
           paragraphs = extract_paragraphs(doc_item)
-          chapters.append(Chapter(idx, toc_item.title, paragraphs))
+          chapters.append(Chapter(str(idx), toc_item.title, paragraphs))
     return chapters
 
 
 class TTS:
-  def __init__(self, voice: str = "en-US-BrianMultilingualNeural"):
+  def __init__(self, voice: str = VOICES["EN"][0]):
     self.voice = voice
 
   async def chapter_to_audio(self, chapter: Chapter):
@@ -164,6 +169,7 @@ class AudioBookGenerator:
     if not os.path.exists(self.out_folder + "/chapters"):
       os.makedirs(self.out_folder + "/chapters")
 
+
   def generate(self):
     asyncio.run(self._generate())
 
@@ -172,12 +178,16 @@ class AudioBookGenerator:
     book_ffmetadata = self.book.get_metadata_text()
     time = 0.0
     for chapter in self.book.chapters[self.start_chapter: self.end_chapter + 1]:
-      chapter_bytes: io.BytesIO = await self.tts.chapter_to_audio(chapter)
-      chapter_audio: AudioSegment = AudioHelper.bytes2audio(chapter_bytes)
-      print(f"saving {chapter_audio.duration_seconds} seconds")
-      chapter_audio.export(
-        self.out_folder + "/chapters/" + chapter.title + ".mp3"
-      )
+      chapter_save_path = self.out_folder + "/chapters/" + chapter.title + ".mp3"
+      # check if already saved in previous execution
+      if os.path.exists(chapter_save_path):
+        print(f"Skipping an already generated chapter: {chapter.title}")
+        chapter_audio = AudioSegment.from_mp3(chapter_save_path)
+      else:
+        chapter_bytes: io.BytesIO = await self.tts.chapter_to_audio(chapter)
+        chapter_audio: AudioSegment = AudioHelper.bytes2audio(chapter_bytes)
+        print(f"saving {chapter_audio.duration_seconds} seconds")
+        chapter_audio.export(chapter_save_path)
       book_audio += chapter_audio
       book_audio += AudioSegment.silent(CHAPTER_PAUSE_DURATION)
       chapter.start_time = time
@@ -186,9 +196,8 @@ class AudioBookGenerator:
       )
       time = chapter.end_time
       book_ffmetadata += (
-          chapter.get_metadata_text()
+        chapter.get_metadata_text()
       )  # start_time and end_time should be set
-
     audiobook_path = self.out_folder + "/" + self.book.title + ".m4a"
     book_audio.export(audiobook_path, format="mp4")
     self._bind_metadata(book_ffmetadata, audiobook_path)
@@ -216,10 +225,8 @@ class AudioBookGenerator:
   def _save_cover_image(self):
     try:
       cover_base64 = self.book.metadata.cover
-      # Decode the base64 string
       cover_data = base64.b64decode(cover_base64)
       cover_path = self.out_folder + "/cover.jpg"
-      # Choose the appropriate file extension (.jpg or .png)
       with open(cover_path, "wb") as image_file:
         image_file.write(cover_data)
       return cover_path
@@ -229,9 +236,10 @@ class AudioBookGenerator:
 
 if __name__ == "__main__":
   # Get the file path from the user
-  file_path = input("Please provide the path to the ePub file: ")
-  assert file_path.endswith(".epub"), "epub file should have .epub extension"
-  tts = TTS("en-US-BrianMultilingualNeural")
+  parser = argparse.ArgumentParser()
+  parser.add_argument("book_path", help="Path to the epub book file")
+  file_path = parser.parse_args().book_path
+  tts = TTS()
   book = Book(file_path)
   book2audio = AudioBookGenerator(book, tts)
   try:
