@@ -9,7 +9,7 @@
 - fr-BE-CharlineNeural
 - fr-FR-EloiseNeural
 
-##### How to use
+## How to use
 ```bash
 python main.py book_path.epub
 ```
