@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import base64
 import io
 from ebooklib import epub
@@ -11,6 +13,8 @@ from pydub import AudioSegment
 from typing import List
 import subprocess
 import argparse
+from PIL import Image, UnidentifiedImageError
+import logging
 
 ### CONSTANTS ###
 PARAGRAPH_PAUSE_DURATION = 500
@@ -22,6 +26,15 @@ VOICES = {
 }
 #################
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
 
 class AudioHelper:
   @staticmethod
@@ -57,7 +70,7 @@ class Chapter:
 
   def get_metadata_text(self):
     if self.start_time == None or self.end_time == None:
-      print("ERROR, chapter time is NONE", self.start_time, self.end_time)
+      logging.error("Chapter time is NONE", self.start_time, self.end_time)
     return (
       "\n[CHAPTER]\n"
       "TIMEBASE=1/1000\n"
@@ -144,14 +157,14 @@ class TTS:
       if chunk["type"] == "audio":
         audio_bytes.write(chunk["data"])
       elif chunk["type"] == "WordBoundary":
-        print(f"WordBoundary: {chunk}")
+        logging.info(f"WordBoundary: {chunk}")
     audio_bytes.seek(0)
     # handle the case where the chunk is empty
     try:
-      print(f"Decoding the chunk")
+      logging.info(f"Decoding the chunk")
       decoded_chunk = AudioSegment.from_mp3(audio_bytes)
     except Exception as e:
-      print(f"Failed to decode the chunk, reason: {e}, returning a silent chunk.")
+      logging.warning(f"Failed to decode the chunk, reason: {e}, returning a silent chunk.")
       decoded_chunk = AudioSegment.silent(0)
     return decoded_chunk.raw_data
 
@@ -181,12 +194,12 @@ class AudioBookGenerator:
       chapter_save_path = self.out_folder + "/chapters/" + chapter.title + ".mp3"
       # check if already saved in previous execution
       if os.path.exists(chapter_save_path):
-        print(f"Skipping an already generated chapter: {chapter.title}")
+        logging.info(f"Skipping an already generated chapter: {chapter.title}")
         chapter_audio = AudioSegment.from_mp3(chapter_save_path)
       else:
         chapter_bytes: io.BytesIO = await self.tts.chapter_to_audio(chapter)
         chapter_audio: AudioSegment = AudioHelper.bytes2audio(chapter_bytes)
-        print(f"saving {chapter_audio.duration_seconds} seconds")
+        logging.info(f"saving {chapter_audio.duration_seconds} seconds")
         chapter_audio.export(chapter_save_path)
       book_audio += chapter_audio
       book_audio += AudioSegment.silent(CHAPTER_PAUSE_DURATION)
@@ -223,23 +236,39 @@ class AudioBookGenerator:
     subprocess.run(cmd)
 
   def _save_cover_image(self):
+    cover_base64 = self.book.metadata.cover
+    if not cover_base64:
+        logging.error("No cover data available.")
+        return "./default_cover.jpg"
     try:
-      cover_base64 = self.book.metadata.cover
-      cover_data = base64.b64decode(cover_base64)
-      cover_path = self.out_folder + "/cover.jpg"
-      with open(cover_path, "wb") as image_file:
-        image_file.write(cover_data)
-      return cover_path
-    except:
-      return "./default_cover.jpg"
+        cover_data = base64.b64decode(cover_base64)
+    except base64.binascii.Error as e:
+        logging.error(f"Error decoding base64 data: {e}")
+        return "./default_cover.jpg"
+    try:
+        image = Image.open(io.BytesIO(cover_data))
+        image_format = image.format.lower()
+        if image_format not in ['jpeg', 'png', 'gif', 'bmp', 'tiff']:
+            logging.error(f"Unsupported image format: {image_format}")
+            return "./default_cover.jpg"
+        cover_path = os.path.join(self.out_folder, f"cover.{image_format}")
+        image.save(cover_path)
+        return cover_path
+    except UnidentifiedImageError as e:
+        logging.error(f"Error identifying image: {e}")
+    except IOError as e:
+        logging.error(f"Error saving image: {e}")
+    return "./default_cover.jpg"
 
 
 if __name__ == "__main__":
   # Get the file path from the user
   parser = argparse.ArgumentParser()
   parser.add_argument("book_path", help="Path to the epub book file")
+  parser.add_argument("--voice", help=f"Chose one of the voices {VOICES}", default="en-US-BrianMultilingualNeural")
   file_path = parser.parse_args().book_path
-  tts = TTS()
+  voice = parser.parse_args().voice
+  tts = TTS(voice)
   book = Book(file_path)
   book2audio = AudioBookGenerator(book, tts)
   try:
@@ -257,10 +286,10 @@ if __name__ == "__main__":
       or end_chapter > len(toc_titles) - 1
       or start_chapter > end_chapter
     ):
-      print("Invalid chapter range. Exiting.")
+      logging.error("Invalid chapter range. Exiting.")
       sys.exit(1)
     book2audio.start_chapter = start_chapter
     book2audio.end_chapter = end_chapter
     book2audio.generate()
   except Exception as e:
-    print(f"An error occurred: {e}")
+    logging.error(f"An error occurred: {e}")
